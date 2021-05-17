@@ -677,22 +677,6 @@ static const struct of_device_id axp20x_battery_ps_id[] = {
 };
 MODULE_DEVICE_TABLE(of, axp20x_battery_ps_id);
 
-static int axp20x_battery_update_ocv_table(struct axp20x_batt_ps *axp20x_batt)
-{
-	struct power_supply_battery_ocv_table *tab;
-	struct power_supply_battery_info *info;
-	int tab_size;
-
-	info = &axp20x_batt->batt_info;
-
-	tab = power_supply_find_ocv2cap_table(info, 20, &tab_size);
-	if (tab) {
-		/*XXX: program values into the PMIC */
-	}
-
-	return 0;
-}
-
 static int axp20x_power_probe(struct platform_device *pdev)
 {
 	struct axp20x_dev *axp20x = dev_get_drvdata(pdev->dev.parent);
@@ -776,12 +760,6 @@ static int axp20x_power_probe(struct platform_device *pdev)
 			axp20x_batt->max_ccc = ccc;
 			axp20x_set_constant_charge_current(axp20x_batt, ccc);
 		}
-
-		if (axp20x_battery_update_ocv_table(axp20x_batt))
-			dev_err(&pdev->dev,
-				"couldn't configure ocv table\n");
-
-		/*XXX: maybe also set initial RDC */
 	}
 
 	/* Request irqs after registering, as irqs may trigger immediately */
