@@ -9,6 +9,8 @@
  * Mylène Josserand <mylene.josserand@free-electrons.com>
  */
 
+#define DEBUG
+
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/clk.h>
@@ -232,6 +234,7 @@ struct sun8i_codec {
 	int				jack_irq;
 	int				jack_status;
 	int				jack_last_sample;
+	unsigned			jack_last_btn;
 	ktime_t				jack_hbias_ready;
 	int				jack_type;
 	int				last_hmic_irq;
@@ -1480,6 +1483,8 @@ static void sun8i_codec_set_hmic_bias(struct sun8i_codec *scodec, bool enable)
 
 	snd_soc_dapm_sync(dapm);
 
+	dev_dbg(scodec->card->dev, "HMIC bias %s\n", enable ? "on" : "off");
+
 	regmap_update_bits(scodec->regmap, SUN8I_HMIC_CTRL1,
 			   irq_mask, enable ? irq_mask : 0);
 }
@@ -1488,6 +1493,7 @@ static void sun8i_codec_jack_work(struct work_struct *work)
 {
 	struct sun8i_codec *scodec = container_of(work, struct sun8i_codec,
 						  jack_work.work);
+	struct device *dev = scodec->card->dev;
 	unsigned int mdata;
 	int type;
 
@@ -1498,6 +1504,7 @@ static void sun8i_codec_jack_work(struct work_struct *work)
 			return;
 
 		scodec->jack_last_sample = -1;
+		scodec->jack_last_btn = 0;
 
 		if (scodec->jack_type & SND_JACK_MICROPHONE) {
 			/*
@@ -1555,6 +1562,8 @@ static void sun8i_codec_jack_work(struct work_struct *work)
 
 		snd_soc_jack_report(&scodec->jack, type, scodec->jack_type);
 		scodec->jack_status = SUN8I_JACK_STATUS_CONNECTED;
+
+		dev_dbg(dev, "jack: plug-in reported\n");
 	} else if (scodec->jack_status == SUN8I_JACK_STATUS_CONNECTED) {
 		if (scodec->last_hmic_irq != SUN8I_HMIC_STS_JACK_OUT_IRQ_ST)
 			return;
@@ -1564,14 +1573,18 @@ static void sun8i_codec_jack_work(struct work_struct *work)
 			sun8i_codec_set_hmic_bias(scodec, false);
 
 		snd_soc_jack_report(&scodec->jack, 0, scodec->jack_type);
+
+		dev_dbg(dev, "jack: plug-out reported\n");
 	}
 }
 
 static irqreturn_t sun8i_codec_jack_irq(int irq, void *dev_id)
 {
 	struct sun8i_codec *scodec = dev_id;
+	struct device *dev = scodec->card->dev;
 	int type = SND_JACK_HEADSET;
 	unsigned int status, value;
+	unsigned btn_chg = 0;
 
 	guard(mutex)(&scodec->jack_mutex);
 
@@ -1583,6 +1596,8 @@ static irqreturn_t sun8i_codec_jack_irq(int irq, void *dev_id)
 	 * 100ms after each interrupt..
 	 */
 	if (status & BIT(SUN8I_HMIC_STS_JACK_OUT_IRQ_ST)) {
+		dev_dbg(dev, "jack: irq plug-out\n");
+
 		/*
 		 * Out interrupt has priority over in interrupt so that if
 		 * we get both, we assume the disconnected state, which is
@@ -1592,6 +1607,8 @@ static irqreturn_t sun8i_codec_jack_irq(int irq, void *dev_id)
 		mod_delayed_work(system_power_efficient_wq, &scodec->jack_work,
 				 msecs_to_jiffies(100));
 	} else if (status & BIT(SUN8I_HMIC_STS_JACK_IN_IRQ_ST)) {
+		dev_dbg(dev, "jack: irq plug-in\n");
+
 		scodec->last_hmic_irq = SUN8I_HMIC_STS_JACK_IN_IRQ_ST;
 		mod_delayed_work(system_power_efficient_wq, &scodec->jack_work,
 				 msecs_to_jiffies(100));
@@ -1619,9 +1636,22 @@ static irqreturn_t sun8i_codec_jack_irq(int irq, void *dev_id)
 		 * samples are identical.
 		 */
 		if (scodec->jack_last_sample >= 0 &&
-		    scodec->jack_last_sample == value)
+		    scodec->jack_last_sample == value) {
 			snd_soc_jack_report(&scodec->jack, type,
 					    scodec->jack_type);
+			btn_chg = (scodec->jack_last_btn ^ type) & SUN8I_CODEC_BUTTONS;
+			scodec->jack_last_btn = type;
+		}
+
+		if (btn_chg & SND_JACK_BTN_0)
+			dev_dbg(dev, "jack: key_%spress BTN_0 (%#x)\n",
+				type & SND_JACK_BTN_0 ? "" : "de", value);
+		if (btn_chg & SND_JACK_BTN_1)
+			dev_dbg(dev, "jack: key_%spress BTN_1 (%#x)\n",
+				type & SND_JACK_BTN_1 ? "" : "de", value);
+		if (btn_chg & SND_JACK_BTN_2)
+			dev_dbg(dev, "jack: key_%spress BTN_2 (%#x)\n",
+				type & SND_JACK_BTN_2 ? "" : "de", value);
 
 		scodec->jack_last_sample = value;
 	}
