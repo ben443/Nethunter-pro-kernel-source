@@ -767,7 +767,7 @@ static int rockchip_spi_enable_clocks(struct rockchip_spi *rs, bool en)
 		clk_disable_unprepare(rs->apb_pclk);
 	}
 
-	rs->clk_enabled = en;
+	rs->clk_enabled = !!en;
 	return 0;
 }
 
@@ -812,6 +812,7 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 		return dev_err_probe(&pdev->dev, PTR_ERR(rs->spiclk),
 				     "Failed to get spi_pclk\n");
 
+	rs->clk_enabled = true;
 	spi_enable_chip(rs, false);
 
 	ret = platform_get_irq(pdev, 0);
@@ -918,7 +919,9 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 	pm_runtime_set_autosuspend_delay(&pdev->dev, ROCKCHIP_AUTOSUSPEND_TIMEOUT);
 	pm_runtime_use_autosuspend(&pdev->dev);
 	pm_runtime_set_active(&pdev->dev);
-	pm_runtime_enable(&pdev->dev);
+	ret = devm_pm_runtime_enable(&pdev->dev);
+	if (ret < 0)
+		goto err_pm_disable;
 
 	ret = devm_spi_register_controller(&pdev->dev, ctlr);
 	if (ret < 0) {
@@ -929,8 +932,6 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 	return 0;
 
 err_pm_disable:
-	pm_runtime_dont_use_autosuspend(&pdev->dev);
-	pm_runtime_disable(&pdev->dev);
 	if (ctlr->dma_rx)
 		dma_release_channel(ctlr->dma_rx);
 err_free_dma_tx:
@@ -944,12 +945,6 @@ static void rockchip_spi_remove(struct platform_device *pdev)
 {
 	struct spi_controller *ctlr = spi_controller_get(platform_get_drvdata(pdev));
 	struct rockchip_spi *rs = spi_controller_get_devdata(ctlr);
-
-	pm_runtime_get_sync(&pdev->dev);
-	//pm_runtime_dont_use_autosuspend(&pdev->dev);
-	pm_runtime_put_noidle(&pdev->dev);
-	pm_runtime_disable(&pdev->dev);
-	pm_runtime_set_suspended(&pdev->dev);
 
 	if (ctlr->dma_tx)
 		dma_release_channel(ctlr->dma_tx);
