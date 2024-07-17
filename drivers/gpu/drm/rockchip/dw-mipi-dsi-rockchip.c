@@ -1118,6 +1118,31 @@ static const struct component_ops dw_mipi_dsi_rockchip_dphy_ops = {
 	.unbind	= dw_mipi_dsi_rockchip_dphy_unbind,
 };
 
+static int dw_mipi_dsi_dphy_rx_init(struct dw_mipi_dsi_rockchip *dsi)
+{
+	int ret;
+
+	if (dsi->cdata->dphy_rx_init) {
+		ret = clk_prepare_enable(dsi->pclk);
+		if (ret < 0)
+			return ret;
+
+		ret = clk_prepare_enable(dsi->grf_clk);
+		if (ret) {
+			clk_disable_unprepare(dsi->pclk);
+			return ret;
+		}
+
+		ret = dsi->cdata->dphy_rx_init(dsi->dphy);
+		clk_disable_unprepare(dsi->grf_clk);
+		clk_disable_unprepare(dsi->pclk);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
 static int dw_mipi_dsi_dphy_init(struct phy *phy)
 {
 	struct dw_mipi_dsi_rockchip *dsi = phy_get_drvdata(phy);
@@ -1138,23 +1163,9 @@ static int dw_mipi_dsi_dphy_init(struct phy *phy)
 	if (ret < 0)
 		goto err_graph;
 
-	if (dsi->cdata->dphy_rx_init) {
-		ret = clk_prepare_enable(dsi->pclk);
-		if (ret < 0)
-			goto err_init;
-
-		ret = clk_prepare_enable(dsi->grf_clk);
-		if (ret) {
-			clk_disable_unprepare(dsi->pclk);
-			goto err_init;
-		}
-
-		ret = dsi->cdata->dphy_rx_init(phy);
-		clk_disable_unprepare(dsi->grf_clk);
-		clk_disable_unprepare(dsi->pclk);
-		if (ret < 0)
-			goto err_init;
-	}
+	ret = dw_mipi_dsi_dphy_rx_init(dsi);
+	if (ret < 0)
+		goto err_init;
 
 	return 0;
 
@@ -1337,6 +1348,12 @@ static int __maybe_unused dw_mipi_dsi_rockchip_resume(struct device *dev)
 			dw_mipi_dsi_rockchip_config(dsi->slave);
 
 		clk_disable_unprepare(dsi->grf_clk);
+	} else if (dsi->usage_mode == DW_DSI_USAGE_PHY) {
+		ret = dw_mipi_dsi_dphy_rx_init(dsi);
+		if (ret < 0) {
+			DRM_DEV_ERROR(dsi->dev, "hardware-specific phy init failed: %d\n", ret);
+			return ret;
+		}
 	}
 
 	return 0;
