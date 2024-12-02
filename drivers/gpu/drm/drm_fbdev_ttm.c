@@ -179,6 +179,7 @@ int drm_fbdev_ttm_driver_fbdev_probe(struct drm_fb_helper *fb_helper,
 	struct fb_info *info;
 	size_t screen_size;
 	void *screen_buffer;
+	u32 fb_start;
 	u32 format;
 	int ret;
 
@@ -227,6 +228,19 @@ int drm_fbdev_ttm_driver_fbdev_probe(struct drm_fb_helper *fb_helper,
 	ret = fb_deferred_io_init(info);
 	if (ret)
 		goto err_drm_fb_helper_release_info;
+
+	ret = of_property_read_u32_index(of_chosen, "p-boot,framebuffer-start", 0, &fb_start);
+	if (ret == 0) {
+		// copy framebuffer contents from p-boot if reasonable
+		if (screen_size != 720 * 1440 * 4) {
+			drm_err(dev, "surface width(%d), height(%d) and bpp(%d) does not match p-boot requirements\n",
+				    sizes->surface_width, sizes->surface_height,
+				    sizes->surface_bpp);
+			return 0;
+		}
+
+		memcpy(screen_buffer, __va(fb_start), screen_size);
+	}
 
 	return 0;
 
