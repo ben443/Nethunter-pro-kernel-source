@@ -758,7 +758,7 @@
 			altmodes {
 				dp {
 					svid = /bits/ 16 <0xff01>;
-					vdo = <0x0c46>;
+					vdo = <0x1c46>;
 				};
 			};
 
